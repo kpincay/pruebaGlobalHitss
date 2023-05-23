@@ -9,6 +9,11 @@ using ServiceExtAplication = Prueba.Application.ServiceExtensions;
 using Serilog;
 using Serilog.Events;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
+using System.Text;
+using Prueba.Application.Common.Wrappers;
+using Newtonsoft.Json;
 
 Log.Logger = new LoggerConfiguration()
             .MinimumLevel.Override("Microsoft", LogEventLevel.Information)
@@ -51,6 +56,50 @@ try
 
         var xmlFilename = $"{Assembly.GetExecutingAssembly().GetName().Name}.xml";
         c.IncludeXmlComments(Path.Combine(AppContext.BaseDirectory, xmlFilename));
+    });
+
+
+    builder.Services.AddAuthentication(options =>
+    {
+        options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+        options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+    }).AddJwtBearer(o =>
+    {
+        o.RequireHttpsMetadata = false;
+        o.SaveToken = false;
+        o.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuer = false,
+            ValidateIssuerSigningKey = false,
+            ValidateAudience = false,
+            ValidateLifetime = false,
+            ValidateActor = false
+        };
+        o.Events = new JwtBearerEvents()
+        {
+            OnAuthenticationFailed = c =>
+            {
+                c.NoResult();
+                c.Response.StatusCode = 500;
+                c.Response.ContentType = "text/plain";
+                return c.Response.WriteAsync(c.Exception.ToString());
+            },
+            OnChallenge = context =>
+            {
+                context.HandleResponse();
+                context.Response.StatusCode = 401;
+                context.Response.ContentType = "application/json";
+                var result = JsonConvert.SerializeObject(new ResponseType<string>("Usted no esta autorizado"));
+                return context.Response.WriteAsync(result);
+            },
+            OnForbidden = context =>
+            {
+                context.Response.StatusCode = 403;
+                context.Response.ContentType = "application/json";
+                var result = JsonConvert.SerializeObject(new ResponseType<string>("Usted no tiene permisos sobre este recurso"));
+                return context.Response.WriteAsync(result);
+            }
+        };
     });
 
     builder.Services.AddFluentValidation(conf =>
@@ -100,6 +149,8 @@ try
     app.UseHttpsRedirection();
     app.UseRouting();
     app.UseCors();
+    app.UseAuthentication();
+    app.UseAuthorization();
     app.UseErrorHandlerMiddleware();
     app.MapControllers();
     app.Run();
